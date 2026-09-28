@@ -70,6 +70,7 @@
           h('button.btn.small', { type: 'button', on: { click: () => { G.audio.tap(); app.settings(); } } }, '설정'),
           h('button.btn.small', { type: 'button', on: { click: () => { G.audio.tap(); app.about(); } } }, '선생님께'))),
       h('p.credit', '원문: 퇴계 이황 「도산십이곡」(1565) · 게임 속 아이와 몇몇 장면은 지어낸 설정이에요'),
+      h('p.credit', '배경음: 국립국악원 「국악기 디지털 음원」 악구(공공누리 제1유형)를 이어 붙여 편집 · 노래 가락과 효과음은 합성'),
       h('p.credit.maker', '만든 사람: 박준일(온양여자고등학교 국어 교사)')));
   };
 
@@ -278,9 +279,12 @@
       wrap.appendChild(cap);
     }
     r.appendChild(h('div.page.play.part' + song.part, topbar({ title: song.title, sub: song.part === 1 ? '1부 · 언지' : '2부 · 언학', steps: true, help: true }), h('div.stage', wrap, panel)));
-    G.audio.play(song.music || (song.part === 1 ? 'eonji' : 'eonhak'));
     G.audio.chapter();
     await scene.ready;
+    if (current !== c) return;
+    // 풍경 그림을 먼저 받고 나서 곡을 바꾼다(느린 망에서 그림이 늦지 않게). 곧 쓸 녹음도 미리 받아 둔다
+    G.audio.play(song.music || (song.part === 1 ? 'eonji' : 'eonhak'));
+    G.audio.prefetch('ri', song.n === 10 ? 'stray' : null, song.n === 6 || song.n === 12 ? 'finale' : null);
 
     // 곡 열기
     if (!done(n, 'open')) {

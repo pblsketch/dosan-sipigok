@@ -148,6 +148,7 @@ async function tapSpot() {
 }
 
 async function kyeong(num, opts = {}) {
+  await page.waitForFunction(() => document.querySelector('.play.st-kyeong') && G.app.cur().scene.spots.length > 0, null, { timeout: 15000 });
   if (opts.miss) { const box = await vis('.scene').boundingBox(); await page.mouse.click(box.x + 20, box.y + 30); await wait(250); }
   for (let guard = 0; guard < 12; guard++) {
     if (await tapSpot()) continue;
@@ -324,6 +325,8 @@ await page.goto(BASE);
 await page.waitForSelector('.title-screen');
 await page.mouse.click(8, 400); // 첫 터치(소리 켜기)
 await wait(600);
+// 배경음: 국립국악원 녹음(첫 화면은 대금 청성곡)이 실제로 흐르는가
+check(await page.waitForFunction(() => G.audio.now() === 'dosan' && G.audio.nowRec(), null, { timeout: 10000 }).then(() => true, () => false), '첫 화면 배경음이 녹음으로 흘러야 함');
 const fontOk = await page.evaluate(async () => { await document.fonts.load('20px DosanYet', 'ᄒᆞᄆᆞᆯ며'); await document.fonts.ready; return { yet: document.fonts.check('20px DosanYet', 'ᄒᆞᄆᆞᆯ며'), brush: document.fonts.check('40px DosanBrush', '도산십이곡') }; });
 check(fontOk.yet && fontOk.brush, '글꼴 ' + JSON.stringify(fontOk));
 await shot('title');

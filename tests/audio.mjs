@@ -1,4 +1,5 @@
 // 배경음 점검: 곡마다 20초를 오프라인으로 렌더해 음량(RMS)·최고값을 잰다. 곡끼리 음량이 비슷해야 한다.
+//   녹음 배경음(assets/bgm)이 있는 곡은 녹음을, 없는 곡은 합성 곡을 잰다(gain은 REC 또는 TRACKS의 값).
 //   cd tests && node audio.mjs [--preview]   (--preview: design/audio_preview/에 wav로 저장)
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -27,7 +28,7 @@ const res = await page.evaluate(async (preview) => {
       for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, d[i])) * 32767, true);
       wav = Array.from(new Uint8Array(bytes));
     }
-    out.push({ name, gain: G.audio.TRACKS[name].gain, rmsDb: 20 * Math.log10(rms), peak, wav });
+    out.push({ name, gain: G.audio.REC && G.audio.REC[name] ? G.audio.REC[name].gain : G.audio.TRACKS[name].gain, rmsDb: 20 * Math.log10(rms), peak, wav });
   }
   return out;
 }, preview);

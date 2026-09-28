@@ -319,6 +319,48 @@
     },
   };
 
+  // ───────── 녹음 배경음(국립국악원 「국악기 디지털 음원」, 공공누리 제1유형)
+  // 악구 녹음을 이어 붙여 반복되게 편집한 파일(tools/bgm_build.py). 불러오지 못하면 위의 합성 곡으로 대신한다.
+  //  len: 반복 길이(초, tools/bgm_build.py가 적은 assets/bgm/bgm.json). MP3 끝의 빈 틈은 반복에서 뺀다
+  //  pair: 같은 길이·같은 장단의 짝 곡. 서로 넘어갈 때 같은 자리에서 이어 간다(1부 거문고 ↔ 마음의 눈 양금)
+  const REC = {
+    dosan: { file: 'assets/bgm/dosan.mp3', len: 78.86, gain: 0.55, src: '대금 「청성곡」' },
+    eonji: { file: 'assets/bgm/eonji.mp3', len: 99.311, gain: 1.6, pair: 'ri', src: '거문고 「윗도드리」' },
+    ri: { file: 'assets/bgm/ri.mp3', len: 99.31, gain: 1.15, pair: 'eonji', src: '양금 「윗도드리」' },
+    eonhak: { file: 'assets/bgm/eonhak.mp3', len: 68.385, gain: 0.88, src: '대금 「염불도드리」' },
+    thunder: { file: 'assets/bgm/thunder.mp3', len: 119.576, gain: 1.07, src: '피리 「수제천」' },
+    stray: { file: 'assets/bgm/stray.mp3', len: 17.44, gain: 1.08, src: '피리 경기대풍류 「당악」' },
+    finale: { file: 'assets/bgm/finale.mp3', len: 65.435, gain: 0.93, src: '대금 「군악」' },
+  };
+  const bytes = {};   // 내려받은 파일(압축된 채로 모두 둔다, 모두 합쳐 약 4MB)
+  const decoded = []; // 풀어 둔 소리(메모리를 아끼려고 최근 셋만): { name, buf, start, len }
+  const failed = {};
+  const pos = {};     // 곡마다 멈춘 자리(다시 들어오면 이어서)
+  function fetchRec(name) {
+    if (!bytes[name]) bytes[name] = fetch(REC[name].file).then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); });
+    return bytes[name];
+  }
+  async function loadRec(name) {
+    const hit = decoded.find((d) => d.name === name);
+    if (hit) { decoded.splice(decoded.indexOf(hit), 1); decoded.push(hit); return hit; }
+    const ab = await fetchRec(name);
+    const buf = await new Promise((res, rej) => ctx.decodeAudioData(ab.slice(0), res, rej));
+    // 크롬·파이어폭스는 MP3 앞뒤의 빈 틈(인코더 지연)을 떼고 풀어 준다. 떼지 않은 브라우저에서만 앞 틈을 건너뛴다
+    const len = REC[name].len || buf.duration;
+    const extra = Math.max(0, buf.duration - len);
+    let start = 0;
+    if (extra > 0.005) {
+      const d = buf.getChannelData(0), lim = Math.floor(Math.min(extra, 0.08) * buf.sampleRate);
+      let i = 0; while (i < lim && Math.abs(d[i]) < 1e-4) i++;
+      start = i / buf.sampleRate;
+    }
+    const item = { name, buf, start, len: Math.min(len, buf.duration - start) };
+    decoded.push(item);
+    while (decoded.length > 3) decoded.shift();
+    return item;
+  }
+  A.prefetch = function (...names) { for (const n of names) if (REC[n] && !failed[n]) fetchRec(n).catch(() => { failed[n] = true; }); };
+
   function buildTrack(def) {
     const u = def.unit, ev = [];
     const L = parse(def.lead.mel, def.mode, def.tonic);
@@ -384,8 +426,35 @@
   const trackOf = (name) => built[name] || (built[name] = buildTrack(TRACKS[name]));
   let sched = null, cur = null;
   function startTrack(name) {
+    const from = cur && cur.rec ? { name: cur.name, at: recAt(cur) } : null;
     stopTrack(true);
     if (!TRACKS[name]) return;
+    if (REC[name] && !failed[name]) return startRec(name, from);
+    startSynth(name);
+  }
+  // 지금 녹음이 흐르는 자리(초)
+  function recAt(c) { return ((ctx.currentTime - c.t0) + c.offset) % c.len; }
+  function startRec(name, from) {
+    const bus = ctx.createGain(); bus.gain.value = 0.0001; bus.connect(musicBus);
+    const me = (cur = { name, bus, rec: true, t0: 0, offset: 0, len: 1, src: null });
+    loadRec(name).then((r) => {
+      if (cur !== me) return;
+      // 짝 곡에서 넘어오면 같은 자리에서, 아니면 멈췄던 자리에서
+      const offset = from && REC[name].pair === from.name ? from.at % r.len : (pos[name] || 0) % r.len;
+      const src = ctx.createBufferSource();
+      src.buffer = r.buf; src.loop = true; src.loopStart = r.start; src.loopEnd = r.start + r.len;
+      src.connect(bus);
+      const t = ctx.currentTime + 0.05;
+      src.start(t, r.start + offset);
+      Object.assign(me, { src, t0: t, offset, len: r.len });
+      bus.gain.setValueAtTime(0.0001, t);
+      bus.gain.exponentialRampToValueAtTime(REC[name].gain || 1, t + (from ? 1.2 : 1.8));
+    }).catch(() => {
+      failed[name] = true;
+      if (cur === me) { cur = null; bus.disconnect(); startSynth(name); }
+    });
+  }
+  function startSynth(name) {
     const tr = trackOf(name);
     const bus = ctx.createGain(); bus.gain.value = 0.0001; bus.connect(musicBus);
     bus.gain.exponentialRampToValueAtTime(TRACKS[name].gain || 1, ctx.currentTime + 1.2);
@@ -409,10 +478,11 @@
   function stopTrack(fast) {
     if (sched) { clearInterval(sched); sched = null; }
     if (cur && ctx) {
-      const b = cur.bus, now = ctx.currentTime;
+      const b = cur.bus, now = ctx.currentTime, end = now + (fast ? 0.8 : 1.5);
+      if (cur.rec && cur.src) { pos[cur.name] = recAt(cur); try { cur.src.stop(end + 0.1); } catch (e) { /* 무시 */ } }
       b.gain.cancelScheduledValues(now);
       b.gain.setValueAtTime(Math.max(0.0001, b.gain.value), now);
-      b.gain.exponentialRampToValueAtTime(0.0001, now + (fast ? 0.8 : 1.5));
+      b.gain.exponentialRampToValueAtTime(0.0001, end);
       setTimeout(() => b.disconnect(), 3000);
     }
     cur = null;
@@ -557,9 +627,18 @@
   }
 
   // ───────── 미리 듣기·점검용: 곡을 오프라인으로 렌더해 AudioBuffer로 돌려준다
-  A.render = async function (name, seconds = 20, rate = 44100) {
+  A.render = async function (name, seconds = 20, rate = 44100, opt = {}) {
     const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     const off = new OAC(2, Math.ceil(seconds * rate), rate);
+    if (REC[name] && opt.synth !== true) {
+      // 녹음 곡: 게임과 같은 길(곡 음량 → 배경음 버스 → 압축기)로 흘린다
+      const ab = await fetchRec(name);
+      const buf = await off.decodeAudioData(ab.slice(0));
+      const g = buildGraph(off);
+      const tb = off.createGain(); tb.gain.value = REC[name].gain || 1; tb.connect(g.musicBus);
+      const src = off.createBufferSource(); src.buffer = buf; src.loop = true; src.connect(tb); src.start(0, Math.min(10, buf.duration / 3));
+      return off.startRendering();
+    }
     const saved = [ctx, comp, musicBus, sfxBus, revIn, ksCache, noiseBuf];
     try {
       ctx = off; ksCache = {}; noiseBuf = null;
@@ -575,6 +654,9 @@
     return off.startRendering();
   };
   A.now = () => (cur ? cur.name : null); // 지금 실제로 흐르는 곡(점검용)
+  A.nowRec = () => !!(cur && cur.rec && cur.src); // 녹음이 흐르고 있는지(점검용)
+  A.where = () => (cur && cur.rec && cur.src ? { name: cur.name, at: recAt(cur) } : null); // 녹음의 지금 자리(점검용)
+  A.REC = REC;
   A.TRACKS = TRACKS;
   A._parse = parse;
 })();
