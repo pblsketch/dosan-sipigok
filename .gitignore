@@ -11,3 +11,4 @@ tests/shots/
 .omc/
 # 파이썬 캐시
 __pycache__/
+tests/*.log

@@ -444,3 +444,70 @@ button.scene-caption .tag { margin-left: 2px; }
   .card { padding: 10px 12px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* ───── 학생 검토 뒤 보탠 것 ───── */
+/* 풀이·현대 표기의 빈자리: 시어를 되살리기 전에는 뜻을 가려 둔다(앞뒤 말로 자리를 찾게) */
+.gloss u, .modern u { text-decoration-color: rgba(38,34,29,.35); text-underline-offset: 3px; }
+u.gb { text-decoration: none; display: inline-block; min-width: 3.2em; border-bottom: 1.5px dashed var(--ink-3); background: rgba(38,34,29,.06); border-radius: 4px 4px 0 0; line-height: 1.2; vertical-align: baseline; }
+u.gb > span { visibility: hidden; }
+u.gb::before { content: '?'; position: absolute; }
+u.gb { position: relative; text-align: center; }
+u.gb::before { left: 0; right: 0; color: var(--ink-3); font-size: .9em; }
+u.just { animation: ink-in 1.4s ease-out; }
+.poem.veiled-aid .gloss, .poem.veiled-aid .modern { filter: blur(5px); user-select: none; -webkit-user-select: none; }
+/* 음보 끊기 규칙 띠 */
+.footrule { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 2px 0 6px; font-size: .78em; }
+.footrule span { background: rgba(248,242,228,.9); border: 1px solid rgba(38,34,29,.15); border-radius: 999px; padding: 1px 9px; color: var(--ink-2); }
+.footrule span.jr { border-color: var(--seal); color: var(--ink); }
+/* 가르기 판 앞의 설명(세 노래) */
+.legend { margin: 4px 0 8px; padding: 8px 10px 8px 26px; background: rgba(248,242,228,.75); border: 1px solid rgba(38,34,29,.12); border-radius: 10px; font-size: .86em; line-height: 1.55; }
+.legend li + li { margin-top: 4px; }
+/* 通 낙관: 첫 시도 만점 + 도움 없이 */
+.tong { display: inline-flex; align-items: center; justify-content: center; width: 1.7em; height: 1.7em; background: var(--seal); color: #fff8ec; font-family: var(--serif); font-weight: 700; border-radius: 3px; transform: rotate(-6deg); box-shadow: 0 1px 3px rgba(80,20,10,.35); line-height: 1; }
+.tong.off { background: transparent; color: var(--ink-3); border: 1.5px dashed var(--ink-3); box-shadow: none; }
+.pane .tong { position: absolute; top: 8px; right: 6px; font-size: .78em; z-index: 2; }
+.gil .pane .tong { top: 10px; right: 10px; font-size: 1em; }
+.tong-note { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 8px 12px; border-radius: 10px; background: rgba(248,242,228,.8); border: 1px solid rgba(38,34,29,.12); font-size: .88em; color: var(--ink-2); }
+.tong-note .tong { flex: none; font-size: 1.2em; }
+.tong-note.on { border-color: var(--seal); color: var(--ink); }
+.tong-note.on .tong { animation: tongin .6s cubic-bezier(.2,1.6,.4,1) both; }
+@keyframes tongin { 0% { transform: rotate(-6deg) scale(2.2); opacity: 0; } 100% { transform: rotate(-6deg) scale(1); opacity: 1; } }
+.tong-lead { margin: -4px 0 0; }
+
+/* ───── 디자인 검토 뒤 보탠 것 ───── */
+/* 音: 원문 판을 옛 판본처럼(띄어쓰기 가림) */
+.poem.mokpan .jt .sp { display: none; }
+.aid-btn.peek { display: none; }
+@media (max-width: 899px) {
+  /* 휴대폰: 음보 끊기 동안 원문 판을 접어 끊을 줄이 첫 화면에 오게 */
+  .play.st-foot .poem.mokpan:not(.open) .jang { display: none; }
+  .play.st-foot .aid-btn.peek { display: inline-block; }
+  .play.st-foot .poem.mokpan .aid-btn:not(.peek) { display: none; }
+  /* 마음의 눈: 풍경을 키워 이름표가 보이게 */
+  .play.lensing .scene-wrap { height: 50vh; height: 50dvh; }
+  .play.lensing .scene-caption { display: none; }
+}
+/* 남은 빗금 ○ / 그은 빗금 ● */
+.jl .need { display: block; font-style: normal; font-size: .72em; letter-spacing: .08em; color: var(--seal); font-weight: 400; margin-top: 2px; }
+.fline.done .jl .need { color: var(--ink-3); }
+/* 글자를 눌러도 끊긴다 */
+.footboard:not(.singing) .fline:not(.done) .syl { pointer-events: auto; cursor: pointer; border-radius: 4px; }
+.footboard:not(.singing) .fline:not(.done) .syl:active { background: rgba(179,52,42,.12); }
+.bare-tag { margin-left: auto; font-size: .72em; font-weight: 700; color: var(--ink-2); border: 1px dashed var(--ink-3); border-radius: 999px; padding: 1px 9px; }
+/* 단계 도장: 景 → 理 → 音 */
+.step-stamp { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 6; pointer-events: none; font-family: var(--brush); font-size: clamp(56px, 16vmin, 120px); color: rgba(38,34,29,.82); text-shadow: 0 0 18px rgba(248,242,228,.95), 0 0 6px rgba(248,242,228,.9); animation: stepin 1.45s ease-out both; }
+@keyframes stepin { 0% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); } 20% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -54%) scale(1); } }
+/* 곡을 마치면 풍경 위에 낙관 */
+.scene-seal { position: absolute; right: 14px; bottom: 16px; z-index: 6; pointer-events: none; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-weight: 700; font-size: 40px; line-height: 1; color: #fff8ec; background: var(--seal); border-radius: 5px; transform: rotate(-6deg); box-shadow: 0 3px 12px rgba(60,14,6,.45); animation: tongseal .55s cubic-bezier(.2,1.6,.4,1) both; }
+.scene-seal.xi { background: #4a4238; }
+.scene-seal.gold, .tong.gold { background: #b8892c; }
+@keyframes tongseal { 0% { opacity: 0; transform: rotate(-6deg) scale(2.4); } 100% { opacity: 1; transform: rotate(-6deg) scale(1); } }
+.tong.xi { background: #4a4238; }
+/* 병풍에 걸기: 방금 마친 폭의 바랜 그림이 걷힌다 */
+.pane.hang .img.fade { filter: grayscale(.9) contrast(.8) brightness(1.08); opacity: 1; animation: unfade 1.2s ease-in .35s forwards; }
+@keyframes unfade { to { opacity: 0; } }
+.pane.hang .tong { animation: tongseal .55s cubic-bezier(.2,1.6,.4,1) 1.3s both; }
+.btn.pulse { animation: hint2 .9s ease-in-out 1.6s 3; }
+.retry-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: center; margin-top: 10px; }
+/* 결과 화면 길: 이름 낙관(오른쪽 위)과 겹치지 않게 通·習은 오른쪽 아래 */
+.final.gil .pane .tong { top: auto; bottom: 10px; }

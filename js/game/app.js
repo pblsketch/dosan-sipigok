@@ -102,7 +102,7 @@
   };
 
   // ───────── 병풍(1부) · 길(2부) ─────────
-  app.map = function (p) {
+  app.map = function (p, opt = {}) {
     const r = clear();
     at('part=' + p);
     G.audio.play(p === 1 ? 'dosan' : 'eonhak');
@@ -110,22 +110,48 @@
     const nextSong = list.find((s) => !S().done[s.n]);
     const box = h('div.main-inner');
     const panels = h('div.' + (p === 1 ? 'byeongpung' : 'gil'));
+    const sealOf = (s) => (G.save.mastered(s.n) ? h('span.tong' + (S().gold[s.n] ? '.gold' : ''), { title: S().gold[s.n] ? '다시 해서 되찾은 通' : '첫 시도에 모두 맞히고 도움 없이 끝낸 곡' }, '通') : S().done[s.n] ? h('span.tong.xi', { title: '익힌 곡' }, '習') : null);
     list.forEach((s, i) => {
       const open = S().teacher || S().done[s.n] || s === nextSong || (i > 0 && S().done[list[i - 1].n]);
-      const el = h('button.pane' + (S().done[s.n] ? '.done' : '') + (s === nextSong ? '.next' : ''), { type: 'button', disabled: !open, 'aria-label': s.title + (S().done[s.n] ? ' (완성)' : '') },
+      const hang = opt.hang === s.n;
+      const el = h('button.pane' + (S().done[s.n] ? '.done' : '') + (s === nextSong ? '.next' : '') + (hang ? '.hang' : ''), { type: 'button', disabled: !open, 'aria-label': s.title + (S().done[s.n] ? ' (완성)' : '') },
         h('span.img', { style: { backgroundImage: `url(assets/sc/${s.scene.img}${S().done[s.n] ? '' : '_f'}.webp)`, backgroundPosition: (s.scene.thumb || '50% 50%') } }),
-        h('span.lbl', h('b', yet(s.title)), h('small', S().done[s.n] ? yet(s.key) : open ? '펼치기' : '　')));
+        // 방금 마친 폭: 바랜 그림이 걷히며 색이 드러난다
+        hang ? h('span.img.fade', { style: { backgroundImage: `url(assets/sc/${s.scene.img}_f.webp)`, backgroundPosition: (s.scene.thumb || '50% 50%') } }) : null,
+        h('span.lbl', h('b', yet(s.title)), h('small', S().done[s.n] ? yet(s.key) : open ? '펼치기' : '　')),
+        sealOf(s));
       el.addEventListener('click', () => { G.audio.page(); app.song(s.n); });
       panels.appendChild(el);
     });
-    const all = list.every((s) => S().done[s.n]);
+    const done = list.filter((s) => S().done[s.n]).length;
+    const all = done === list.length;
+    const tong = list.filter((s) => G.save.mastered(s.n)).length;
+    // 通이 없는 폭은 '도움 없이 다시'로 되찾을 수 있다
+    const retryable = list.filter((s) => S().done[s.n] && !G.save.mastered(s.n));
     box.append(
       h('p.lead', p === 1 ? '먹빛으로 바랜 여섯 폭 병풍이에요. 한 폭에 노래 한 곡씩, 시어를 되살리면 풍경에 색이 돌아와요.' : '배움의 길 여섯 구간이에요. 한 구간에 노래 한 곡씩, 노래를 익히며 길을 걸어요.'),
+      h('p.small.muted.tong-lead', G.util.boldNodes(`첫 시도에 모두 맞히고 도움 없이 끝낸 곡에는 붉은 **通** 낙관이, 나머지 곡에는 먹빛 **習**(익힘) 낙관이 찍혀요. (通 ${tong} / ${list.length})`)),
       panels,
       h('div.next-row',
+        !all && done >= 4 ? h('button.btn', { type: 'button', on: { click: () => { G.audio.tap(); app.result(p); } } }, '지금까지 결과 보기(제출)') : null,
         all ? h('button.btn.seal', { type: 'button', on: { click: () => { G.audio.tap(); app.result(p); } } }, p === 1 ? '완성한 병풍 보기' : '완성한 길 보기') :
-          nextSong ? h('button.btn.primary', { type: 'button', on: { click: () => { G.audio.page(); app.song(nextSong.n); } } }, yet(nextSong.title) + ' 펼치기 ▶') : null));
+          nextSong ? h('button.btn.primary' + (opt.hang ? '.pulse' : ''), { type: 'button', on: { click: () => { G.audio.page(); app.song(nextSong.n); } } }, yet(nextSong.title) + ' 펼치기 ▶') : null),
+      retryable.length ? h('div.retry-row', h('span.small.muted', '通을 되찾으려면 도움 없이 다시:'),
+        ...retryable.map((s) => h('button.btn.small.ghost', { type: 'button', on: { click: () => app.retry(s.n) } }, yet(s.title)))) : null);
     r.appendChild(h('div.page.map', topbar({ title: p === 1 ? '1부 · 언지(言志)' : '2부 · 언학(言學)', sub: p === 1 ? '자연에 머무는 뜻' : '배움으로 나아가는 길', home: true }), h('main.main', box)));
+    if (opt.hang) { G.audio.page(); setTimeout(() => G.audio.stamp(), 1300); }
+  };
+
+  // 도움 없이 다시: 그 곡만 처음부터 '다시 읽기' 규칙(풀이 숨김, 세 장 끊기)으로. 通을 받으면 금빛 通
+  app.retry = async function (n) {
+    const song = SONGS.find((s) => s.n === n);
+    const ok = await G.ui.sheet(h('div', h('h3', yet(song.title) + '을 도움 없이 다시 할까요?'),
+      h('p', G.util.boldNodes('처음부터 다시 해요. 이번에는 **풀이를 가리고 세 장을 모두 직접 끊어요**(다시 읽기 규칙). 첫 시도에 모두 맞히고 도움 없이 끝내면 **금빛 通**을 받아요.')),
+      h('p.small.muted', '오답 노트와 지금까지의 기록은 그대로 남아요.')),
+    [{ label: '그만두기', value: false }, { label: '다시 하기', value: true, cls: 'seal' }]);
+    if (!ok) return;
+    G.save.resetSong(n);
+    app.song(n);
   };
 
   // ───────── 상단 막대 ─────────
@@ -145,13 +171,35 @@
     if (play) { play.classList.remove(...STEP_CLS); if (i >= 0) play.classList.add(STEP_CLS[i]); }
     const panel = $('.play .panel');
     if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
+    // 단계가 바뀌면 풍경 위에 붓글씨 한 자를 잠깐 찍는다(景 → 理 → 音)
+    const wrap = $('.play .scene-wrap');
+    if (wrap && i >= 0 && i <= 2) {
+      $$('.step-stamp', wrap).forEach((x) => x.remove());
+      const st = h('div.step-stamp', ['景', '理', '音'][i]);
+      wrap.appendChild(st);
+      setTimeout(() => st.remove(), 1500);
+    }
   }
 
-  app.help = function (btn) {
+  app.help = async function (btn) {
     const c = current;
-    const msg = c && c.helpFn ? c.helpFn() : '';
+    const can = c && c.helpFn && (!c.canHelp || c.canHelp());
+    if (!can) {
+      G.audio.hint();
+      G.ui.pop(btn, '지금은 천천히 읽어 보세요. 막히는 문제가 나오면 여기서 도움을 받을 수 있어요. (지금 누른 것은 도움으로 세지 않아요)');
+      return;
+    }
+    const n = c.song.n;
+    if (!S().helpAsked[n] && !S().teacher && !G.save.state.helpSong[n]) {
+      const ok = await G.ui.sheet(h('div', h('h3', '여백 메모를 볼까요?'),
+        h('p', G.util.boldNodes('도움을 보면 이 곡에는 **通** 낙관 대신 **習** 낙관이 찍혀요. 곡을 마친 뒤 병풍에서 **도움 없이 다시**로 通을 되찾을 수 있어요.'))),
+      [{ label: '혼자 더 해 볼게요', value: false }, { label: '도움 보기', value: true, cls: 'primary' }]);
+      if (!ok || current !== c) return;
+      S().helpAsked[n] = true; G.save.write();
+    }
+    const msg = c.helpFn ? c.helpFn() : '';
     G.audio.hint();
-    G.ui.pop(btn, msg ? G.util.bold(yet(msg)) : '지금은 천천히 읽어 보세요. 막히는 문제가 나오면 여기서 도움을 받을 수 있어요.');
+    G.ui.pop(btn, msg ? G.util.bold(yet(msg)) : '지금은 천천히 읽어 보세요.');
   };
 
   // 병풍 접기: 교사가 "화면 접으세요" 하면 한 번에 멈춘다(소리도 멈춤)
@@ -270,26 +318,46 @@
     const { song, scene, task } = c;
     task.innerHTML = '';
     scene.root.classList.remove('lens');
+    // 마음 고르기를 먼저(씻김이 곡의 마지막 큰 순간이 되게)
+    if (!S().mind[song.n]) {
+      G.kit.say(task, '노래를 마쳤어요. 이 노래에 담긴 **화자의 마음**을 한마디로 고른다면? 다른 곡의 마음도 섞여 있으니 **종장**까지 떠올려 보세요.');
+      const res = await G.kit.choose(task, null, song.mind.options, { song, kind: 'mind', seed: song.n, wrongNote: `화자의 마음 고르기 (${song.n}곡)` });
+      if (current !== c) return;
+      // 마음 지도에는 처음 고른 것을 남긴다(틀렸으면 결과 화면에 → 바른 마음이 함께 나온다)
+      S().mind[song.n] = res.first.t; G.save.write();
+      await wait(1100);
+      if (current !== c) return;
+    }
+    task.innerHTML = '';
+    if (song.noAid && c.poem.showAid) c.poem.showAid();
+    // 씻김
     scene.wash();
     G.audio.wash();
     await wait(1200);
     G.audio.fanfare();
-    // 마음 지도: 이 곡에 담긴 화자의 마음
-    if (!S().mind[song.n]) {
-      G.kit.say(task, '이 노래에 담긴 **화자의 마음**을 한마디로 고른다면?');
-      const res = await G.kit.choose(task, null, song.mind.options, { song, kind: 'mind', seed: song.n });
-      S().mind[song.n] = res.picked.t; G.save.write();
-    }
-    task.appendChild(G.ui.card({ kind: 'note', title: song.title + ' 한눈에', body: song.summary }));
     S().done[song.n] = true;
+    const f = S().first[song.n] || [0, 0], helps = (S().helpSong || {})[song.n] || 0;
+    const clean = f[1] > 0 && f[0] === f[1] && !helps;
+    const retried = S().retry && S().retry[song.n];
+    if (retried) { if (clean) S().gold[song.n] = true; delete S().retry[song.n]; }
     const list = songsOf(song.part);
     if (list.every((s) => S().done[s.n])) S().finishedAt[song.part] = S().finishedAt[song.part] || Date.now();
     G.save.write();
+    await wait(1500);
+    if (current !== c) return;
+    // 풍경 위에 낙관: 通(첫 시도 모두 맞힘 + 도움 없음) 또는 習(익힘)
+    const m = G.save.mastered(song.n), gold = !!S().gold[song.n];
+    scene.root.appendChild(h('div.scene-seal' + (m ? '.tong' : '.xi') + (gold ? '.gold' : ''), m ? '通' : '習'));
+    G.audio.stamp();
+    G.util.buzz();
+    task.appendChild(h('div.tong-note' + (m ? '.on' : ''), h('span.tong' + (m ? (gold ? '.gold' : '') : '.xi'), m ? '通' : '習'),
+      h('span', G.util.boldNodes(m ? (gold ? `**다시 해서 通을 되찾았어요!** 금빛 通 낙관을 찍었어요.` : `**막힘없이 통했어요!** 첫 시도 ${f[0]} / ${f[1]} · 도움 0번.`)
+        : `첫 시도 ${f[0]} / ${f[1]}` + (helps ? ` · 도움 ${helps}번` : '') + '. 익힘(習) 낙관을 찍었어요. 병풍에서 **도움 없이 다시**로 通을 되찾을 수 있어요.'))));
+    task.appendChild(G.ui.card({ kind: 'note', title: song.title + ' 한눈에', body: song.summary }));
     const next = list.find((s) => !S().done[s.n]);
     const row = h('div.next-row',
-      h('button.btn', { type: 'button', on: { click: () => { G.audio.tap(); app.map(song.part); } } }, song.part === 1 ? '병풍 보기' : '길 보기'),
-      next ? h('button.btn.primary', { type: 'button', on: { click: () => { G.audio.page(); app.song(next.n); } } }, yet(next.title) + ' ▶')
-        : h('button.btn.seal', { type: 'button', on: { click: () => { G.audio.tap(); app.result(song.part); } } }, song.part === 1 ? '병풍 완성 ▶' : '길 완성 ▶'));
+      next ? h('button.btn.ghost.small', { type: 'button', on: { click: () => { G.audio.page(); app.song(next.n); } } }, '바로 ' + yet(next.title) + ' ▶') : null,
+      h('button.btn.primary', { type: 'button', on: { click: () => { G.audio.tap(); app.map(song.part, { hang: song.n }); } } }, song.part === 1 ? '병풍에 걸기 ▶' : '길에 새기기 ▶'));
     task.appendChild(row);
     row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }

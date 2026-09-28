@@ -4,8 +4,10 @@
 (function () {
   const { h, $, $$, wait, yet, shuffleNot } = G.util;
   const S = () => G.save.state;
-  const review = () => S().mode === 'review';
+  // 다시 읽기(복습) 또는 '도움 없이 다시'로 연 곡: 풀이를 숨기고 세 장을 모두 끊는다
+  const review = () => S().mode === 'review' || !!(S().retry && G.app && G.app.cur && G.app.cur() && S().retry[G.app.cur().song.n]);
   const kit = (G.kit = {});
+  kit.review = review;
   const steps = (G.steps = {});
 
   // ───────── 공용 부품 ─────────
@@ -40,7 +42,8 @@
     box.appendChild(el);
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     if (c.kind === 'fiction' && c.id) { S().seenFiction[c.id] = true; G.save.write(); }
-    if (opt.wait !== false) await kit.next(box, opt.label || '알겠어요');
+    // wait: false 카드는 단추 없이 놓아 두고 바로 다음 장면으로 간다(곧이어 문제가 나오는 곳)
+    if (opt.wait !== false && c.wait !== false) await kit.next(box, opt.label || '알겠어요');
     return el;
   };
 
@@ -205,11 +208,11 @@
           msg.textContent = `${answers.length}칸 가운데 ${ok}칸이 맞아요. 붉게 번진 칸을 다시 생각해 보세요.`;
         } else msg.textContent = `${answers.length}칸 가운데 ${ok}칸이 맞아요. 어느 칸이 틀렸는지는 아직 알려 주지 않아요.`;
         if (tries >= 3 || S().teacher) reveal.hidden = false;
-        G.save.state.helped += tries >= 2 ? 1 : 0;
+        if (tries >= 2) G.save.help(opt.song && opt.song.n);
       });
       reveal.addEventListener('click', () => {
         for (const s of answers) { const c = chipOf[s.answer]; if (c) put(c, slotEls[s.id]); }
-        G.save.state.helped++;
+        G.save.help(opt.song && opt.song.n);
         confirm.disabled = false;
         confirm.click();
       });
@@ -224,20 +227,21 @@
       if (q) wrap.appendChild(h('p.q', G.util.boldNodes(yet(q))));
       const list = h('div.opts');
       const why = h('p.why');
-      let tries = 0;
+      let tries = 0, first = null;
       const order = opt.keepOrder ? options : shuffleNot(options, opt.seed);
       for (const o of order) {
         const b = h('button.opt', { type: 'button' }, G.util.boldNodes(yet(o.t)));
         b.addEventListener('click', async () => {
           if (wrap.classList.contains('done')) return;
           tries++;
+          if (!first) first = o;
           if (opt.free) {
             G.audio.pick();
             $$('.opt', list).forEach((x) => x.classList.remove('picked'));
             b.classList.add('picked');
             wrap.classList.add('done');
             if (o.why) { why.innerHTML = ''; why.appendChild(G.util.boldNodes(yet(o.why))); }
-            resolve({ picked: o, tries });
+            resolve({ picked: o, tries, first });
             return;
           }
           if (opt.song && tries === 1) G.save.stat(opt.song.n, opt.kind || 'ri', !!o.ok);
@@ -249,7 +253,7 @@
             why.innerHTML = '';
             if (o.why) why.appendChild(G.util.boldNodes(yet(o.why)));
             G.save.write();
-            resolve({ picked: o, tries });
+            resolve({ picked: o, tries, first });
           } else {
             G.audio.no();
             b.classList.add('bad'); b.disabled = true;
@@ -271,7 +275,9 @@
   // 곡 원문을 초·중·종장으로 그린다. 시어 칸은 아직 되살리지 않았으면 먹 번짐(.blank)
   kit.poem = function (song, opt = {}) {
     const leaf = h('div.leaf.poem');
-    const aid = () => (S().mode === 'review' ? 'none' : S().aid || 'gloss'); // 원문 아래 한 줄: 풀이 / 현대 표기 / 없음
+    let forced = null; // 풀이 없이 읽는 곡(noAid)도 곡을 마치면 풀이를 보여 준다
+    const bare = () => review() || song.noAid;
+    const aid = () => forced || (bare() ? 'none' : S().aid || 'gloss'); // 원문 아래 한 줄: 풀이 / 현대 표기 / 없음
     const aidBtn = h('button.aid-btn', { type: 'button', title: '원문 아래 줄 바꾸기' });
     const setAid = () => {
       const a = aid();
@@ -283,7 +289,8 @@
       const order = ['gloss', 'modern', 'none'];
       S().aid = order[(order.indexOf(aid()) + 1) % 3]; G.save.write(); G.audio.tap(); setAid();
     });
-    leaf.appendChild(h('div.poem-head', h('span.seal-mark', '原文'), h('span.num', yet(song.title)), h('span.kind', song.part === 1 ? '언지(言志)' : '언학(言學)'), S().mode === 'review' ? null : aidBtn));
+    leaf.appendChild(h('div.poem-head', h('span.seal-mark', '原文'), h('span.num', yet(song.title)), h('span.kind', song.part === 1 ? '언지(言志)' : '언학(言學)'),
+      bare() ? h('span.bare-tag', song.noAid && !review() ? '풀이 없이 읽기' : '다시 읽기') : aidBtn));
     const lines = [];
     const slots = {};
     song.text.forEach((line, li) => {
@@ -300,16 +307,32 @@
         },
       });
       row.appendChild(h('span.jt', body));
+      // 아직 되살리지 않은 시어는 풀이·현대 표기에서도 빈자리로 둔다(뜻 글자 맞추기가 아니라 앞뒤 말로 자리를 찾게).
+      // 풀이의 _밑줄_은 그 장의 @시어와 차례대로 짝을 짓는다
+      const ids = [...line.matchAll(/@([a-z0-9_]+)/g)].map((m) => m[1]);
+      const open = (id) => !id || (opt.filled && opt.filled(id));
+      const gap = (id, t) => `<u${open(id) ? '' : ' class="gb"'}${id ? ` data-w="${id}"` : ''}><span>${t}</span></u>`;
       if (song.gloss && song.gloss[li]) {
         const g = h('span.gloss');
-        g.innerHTML = G.util.bold(yet(song.gloss[li])).replace(/_(.+?)_/g, '<u>$1</u>');
+        let k = 0;
+        g.innerHTML = G.util.bold(yet(song.gloss[li])).replace(/_(.+?)_/g, (m, t) => gap(ids[k++], t));
         row.appendChild(g);
       }
-      if (song.modern && song.modern[li]) row.appendChild(h('span.modern', song.modern[li]));
+      if (song.modern && song.modern[li]) {
+        let html = G.util.esc(song.modern[li]);
+        for (const id of new Set(ids)) {
+          const r = G.util.esc(G.text.reading(song.words[id].orig, song.words));
+          if (!open(id) && html.includes(r)) html = html.replace(r, gap(id, r));
+        }
+        const m = h('span.modern');
+        m.innerHTML = html;
+        row.appendChild(m);
+      }
       leaf.appendChild(row);
       lines.push(row);
     });
     setAid();
+    leaf.showAid = () => { forced = 'gloss'; setAid(); };
     leaf.fill = function (id) {
       for (const el of slots[id] || []) {
         el.classList.add('filled', 'just');
@@ -318,6 +341,7 @@
         el.removeAttribute('aria-label'); el.tabIndex = -1;
         setTimeout(() => el.classList.remove('just'), 1400);
       }
+      $$(`u.gb[data-w="${id}"]`, leaf).forEach((u) => { u.classList.remove('gb'); u.classList.add('just'); setTimeout(() => u.classList.remove('just'), 1400); });
     };
     leaf.slots = slots;
     leaf.lines = lines;
@@ -332,7 +356,13 @@
     const found = new Set(ids.filter((id) => S().found[key(id)] === 'found' || S().found[key(id)] === 'placed'));
     const placed = new Set(ids.filter((id) => S().found[key(id)] === 'placed'));
     task.innerHTML = '';
-    kit.say(task, song.kyeong || `풍경에서 노래에 나오는 것을 찾아 눌러 보세요. 찾은 시어 카드를 원문의 **먹 번진 칸**에 넣으면 색이 돌아와요.`);
+    const riWords = Object.keys(song.words).some((id) => song.words[id].ri);
+    const twice = ids.some((id) => song.text.join(' ').split('@' + id).length > 2);
+    kit.say(task, (song.kyeong || `풍경에서 노래에 나오는 것을 찾아 눌러 보세요. 찾으면 그 자리에 색이 번지고, 시어 카드를 원문의 **먹 번진 칸**에 넣으면 더 번져요.`) +
+      (review() || song.noAid ? '' : ' 풀이에도 빈자리가 있어요. **빈자리 앞뒤의 말**을 읽고 카드가 들어갈 칸을 찾으세요.') +
+      (song.noAid && !review() ? ' 이 곡은 **풀이 없이** 원문으로 읽어요. 원문의 앞뒤 말을 근거로 칸을 찾으세요.' : '') +
+      (riWords ? ' **파란 칸**은 理 읽기에서 채워요.' : '') +
+      (twice ? ' 같은 시어가 두 번 나오면 카드 한 장으로 두 칸이 함께 채워져요.' : ''));
     const count = h('p.count');
     const tray = h('div.tray');
     task.append(count, tray);
@@ -389,10 +419,12 @@
         sp.btn.classList.add('got');
         scene.reveal(sp.id);
         G.audio.found();
+        G.util.buzz();
         addCard(sp.id, true);
         sinceFind = Date.now();
         upd();
-        if (found.size === 1 && placed.size === 0) G.ui.toast('시어 카드를 원문의 빈칸으로 옮기세요', 2600);
+        // 카드 옮기기 알림은 처음 두 곡에서만
+        if (found.size === 1 && placed.size === 0 && !S().steps['tip-tray']) { if (song.n >= 2) S().steps['tip-tray'] = true; G.ui.toast('시어 카드를 원문의 빈칸으로 옮기세요', 2600); }
       };
       c.onMiss = () => {
         misses++;
@@ -410,6 +442,9 @@
           poem.fill(id);
           card.remove();
           G.audio.ok();
+          // 넣으면 그 자리가 한 번 더 크게 번진다
+          const sp = scene.spots.find((p) => p.id === id);
+          if (sp) scene.bloom(sp.x, sp.y, (sp.rr || sp.r * 1.9) * 2.2, 1300);
           upd();
           tryDone();
           return true;
@@ -422,13 +457,13 @@
         setTimeout(() => target.classList.remove('smudge'), 900);
         if (tryWrong[id] >= 2) {
           const w = song.words[id];
-          G.ui.pop(card, `<b>${G.util.esc(yet(G.text.reading(w.orig, song.words)))}</b>는 「${G.util.esc(yet(w.gloss))}」라는 뜻이에요.${review() ? '' : ' 원문 아래 풀이에서 같은 뜻을 찾아보세요.'}`);
+          G.ui.pop(card, `<b>${G.util.esc(yet(G.text.reading(w.orig, song.words)))}</b>는 「${G.util.esc(yet(w.gloss))}」라는 뜻이에요.${review() ? '' : ' 풀이의 빈자리 앞뒤 말과 어울리는 칸을 찾아보세요.'}`);
         }
         return false;
       });
       // 여백 메모(도움): 못 찾은 곳 → 먹 파문, 다 찾았으면 → 들어갈 칸을 깜빡임
       c.helpFn = () => {
-        S().helped++; G.save.write();
+        G.save.help(song.n); G.save.write();
         const left = ids.filter((id) => !found.has(id));
         if (left.length) {
           const s = scene.spots.find((p) => p.id === left[0]);
@@ -476,8 +511,23 @@
     const todo = review() ? [0, 1, 2] : song.cutLines;
     const first = !S().steps['foot-intro'];
     kit.say(task, song.footAsk || (todo.length === 3
-      ? '옛 판본에는 띄어쓰기가 없어요. 소리 내어 읽으며 **한 호흡(음보)이 끝나는 곳**의 틈을 눌러 빗금(/)을 그으세요. 맞게 끊을 때마다 그 마디가 노래가 돼요.'
-      : '이번에는 **종장**만 끊어 보세요. 초장·중장은 미리 끊어 두었어요.'));
+      ? '옛 판본에는 띄어쓰기가 없어요(위 원문도 옛 판본처럼 붙여 썼어요). 소리 내어 읽으며 **한 마디(음보)가 끝나는 글자**를 누르면 그 뒤에 빗금(/)이 그어져요. 맞게 끊을 때마다 그 마디가 노래가 돼요.'
+      : '이번에는 **종장**만 끊어 보세요. 한 마디가 끝나는 **글자**를 누르면 그 뒤에 빗금(/)이 그어져요.'));
+    // 끊는 규칙을 늘 보이게(외워서가 아니라 규칙을 적용해 끊게)
+    task.appendChild(h('div.footrule',
+      h('span', G.util.boldNodes('한 장은 **네 마디(4음보)**')),
+      h('span', '한 마디는 대개 3~4글자'),
+      h('span', '조사·어미는 앞말에 붙이고, 낱말은 가르지 않아요'),
+      todo.includes(2) ? h('span.jr', G.util.boldNodes('**종장**: 3글자 · 5글자 이상 · 4 · 3')) : null));
+    // 원문 판을 옛 판본처럼(띄어쓰기를 가림). 휴대폰에서는 원문 판을 접어 끊을 줄이 첫 화면에 오게 한다
+    const poem = c.poem;
+    if (poem) {
+      $$('.jt', poem).forEach(markSpaces);
+      poem.classList.add('mokpan');
+      const peek = h('button.aid-btn.peek', { type: 'button' }, '원문 펼치기');
+      peek.addEventListener('click', () => { poem.classList.toggle('open'); peek.textContent = poem.classList.contains('open') ? '원문 접기' : '원문 펼치기'; });
+      $('.poem-head', poem).appendChild(peek);
+    }
     const board = h('div.footboard');
     task.appendChild(board);
     const lineEls = [];
@@ -486,8 +536,17 @@
     const on = {}; // 아래 Promise 안에서 채운다(틈 단추가 먼저 만들어지므로)
 
     specs.forEach((sp, li) => {
-      const row = h('div.fline' + (lineDone[li] ? '.done' : ''), { dataset: { li } }, h('span.jl', ['초장', '중장', '종장'][li]));
+      // 남은 빗금 수: ○는 아직, ●는 그은 빗금
+      const need = h('i.need', { 'aria-label': `빗금 ${sp.cuts.size}개` }, lineDone[li] ? '●'.repeat(sp.cuts.size) : '○'.repeat(sp.cuts.size));
+      const row = h('div.fline' + (lineDone[li] ? '.done' : ''), { dataset: { li } }, h('span.jl', ['초장', '중장', '종장'][li], need));
       const syls = h('div.syls');
+      // 글자를 눌러도 그 뒤 틈을 누른 것으로 친다(손가락이 틈을 빗나가지 않게)
+      syls.addEventListener('click', (e) => {
+        const syl = e.target.closest('.syl');
+        if (!syl) return;
+        const gap = $$('.gap', syls).find((g) => +g.dataset.i === +syl.dataset.i);
+        if (gap && !gap.disabled && on.gap) on.gap(li, +syl.dataset.i, gap);
+      });
       const cutNow = new Set(lineDone[li] ? sp.cuts : []);
       let wrongHere = 0;
       sp.syl.forEach((s, i) => {
@@ -500,8 +559,10 @@
       });
       row.appendChild(syls);
       board.appendChild(row);
-      lineEls.push({ row, syls, sp, cutNow, get wrong() { return wrongHere; }, addWrong() { wrongHere++; totalWrong++; } });
+      lineEls.push({ row, syls, sp, cutNow, need, get wrong() { return wrongHere; }, addWrong() { wrongHere++; totalWrong++; } });
     });
+    const firstTodo = lineEls.find((L, li) => !lineDone[li]);
+    if (firstTodo) setTimeout(() => firstTodo.row.scrollIntoView({ block: 'center', behavior: 'smooth' }), 350);
 
     // 음보 번호: i번째 음절 뒤를 끊었을 때 막 끝난 음보
     const footIndex = (sp, i) => [...sp.cuts].filter((x) => x < i).length;
@@ -523,7 +584,9 @@
           if (L.cutNow.has(i)) return;
           L.cutNow.add(i);
           gap.classList.add('cut'); gap.disabled = true;
+          L.need.textContent = '●'.repeat(L.cutNow.size) + '○'.repeat(L.sp.cuts.size - L.cutNow.size);
           G.audio.cut();
+          G.util.buzz();
           const fi = footIndex(L.sp, i);
           G.audio.foot(plan, li, fi);
           bounce(L, fi);
@@ -563,7 +626,7 @@
         if (g) { g.classList.add('hinted'); setTimeout(() => g.classList.remove('hinted'), 3000); }
       }
       c.helpFn = () => {
-        S().helped++; G.save.write();
+        G.save.help(song.n); G.save.write();
         const L = lineEls.find((x, li) => !lineDone[li]);
         if (!L) return '';
         hintGap(L);
@@ -573,11 +636,12 @@
         S().steps['foot-intro'] = true;
         c.helpFn = null;
         G.save.write();
-        resolve({ plan, specs });
+        if (poem) { poem.classList.remove('mokpan', 'open'); const pk = $('.peek', poem); if (pk) pk.remove(); }
+        resolve({ plan, specs, todo });
       }
       if (S().teacher) {
         task.appendChild(h('div.next-row', h('button.btn.ghost.small', { type: 'button', on: { click: () => {
-          lineEls.forEach((L, li) => { if (lineDone[li]) return; for (const i of L.sp.cuts) { L.cutNow.add(i); const g = $$('.gap', L.syls).find((x) => +x.dataset.i === i); if (g) g.classList.add('cut'); } lineDone[li] = true; L.row.classList.add('done'); S().cut[song.n + '-' + li] = true; });
+          lineEls.forEach((L, li) => { if (lineDone[li]) return; for (const i of L.sp.cuts) { L.cutNow.add(i); const g = $$('.gap', L.syls).find((x) => +x.dataset.i === i); if (g) g.classList.add('cut'); } L.need.textContent = '●'.repeat(L.sp.cuts.size); lineDone[li] = true; L.row.classList.add('done'); S().cut[song.n + '-' + li] = true; });
           done();
         } } }, '선생님용: 정답 채우기')));
       }
@@ -588,12 +652,27 @@
   function isInsideWord(sp, i) {
     return !!sp.inWord && sp.inWord.has(i);
   }
+  // 원문 판의 띄어쓰기를 span.sp로 감싼다(음보 끊기 동안 옛 판본처럼 붙여 보이게)
+  function markSpaces(el) {
+    if (el.dataset.sp) return;
+    el.dataset.sp = '1';
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) if (/ /.test(walker.currentNode.nodeValue) && !walker.currentNode.parentNode.closest('rt')) nodes.push(walker.currentNode);
+    for (const t of nodes) {
+      const frag = document.createDocumentFragment();
+      t.nodeValue.split(/( )/).forEach((part) => frag.appendChild(part === ' ' ? h('span.sp', ' ') : document.createTextNode(part)));
+      t.parentNode.replaceChild(frag, t);
+    }
+  }
 
   // 노래 부르기: 음보마다 글자가 번지며 가락이 흐른다(건너뛸 수 있음)
   steps.sing = async function (c, fp) {
     const { song, task } = c;
     task.innerHTML = '';
-    kit.say(task, '끊은 음보대로 노래해 볼까요? 장구가 치는 곳이 음보의 시작이에요.');
+    // 기본은 방금 끊은 장만 부른다(세 장을 다 끊은 곡은 세 장). '세 장 모두 듣기' 단추를 둔다
+    let only = fp.todo && fp.todo.length < 3 ? fp.todo : [0, 1, 2];
+    kit.say(task, only.length < 3 ? '방금 끊은 음보대로 노래해 볼까요? 장구가 치는 곳이 음보의 시작이에요.' : '끊은 음보대로 노래해 볼까요? 장구가 치는 곳이 음보의 시작이에요.');
     const board = h('div.footboard.singing');
     fp.specs.forEach((sp, li) => {
       const row = h('div.fline.done', h('span.jl', ['초장', '중장', '종장'][li]));
@@ -613,7 +692,8 @@
     const soundOff = !S().sound;
     if (soundOff) kit.say(task, '소리가 꺼져 있어요. 글자가 번지는 박을 눈으로 따라가 보세요.', 'muted');
     const skip = h('button.btn.ghost.small', { type: 'button' }, '건너뛰기');
-    task.appendChild(h('div.next-row', skip));
+    const all = only.length < 3 ? h('button.btn.ghost.small', { type: 'button' }, '세 장 모두 듣기') : null;
+    task.appendChild(h('div.next-row', all, skip));
     let singer;
     const light = (li, fi) => {
       $$('.foot.on', board).forEach((x) => x.classList.remove('on'));
@@ -621,16 +701,33 @@
       const el = $(`.foot[data-li="${li}"][data-fi="${fi}"]`, board);
       if (el) { el.classList.add('on', 'sung'); }
     };
-    if (soundOff) {
-      // 소리 없이: 같은 박으로 글자만 번진다
-      let t = 200;
-      const timers = [];
-      fp.plan.forEach((L, li) => L.forEach((f, fi) => { timers.push(setTimeout(() => light(li, fi), t)); t += f.len * 1000 + (fi === L.length - 1 ? 500 : 80); }));
-      singer = { stop() { timers.forEach(clearTimeout); }, done: wait(t + 400) };
-    } else singer = G.audio.sing(fp.plan, light);
-    await Promise.race([singer.done, new Promise((r) => skip.addEventListener('click', r, { once: true }))]);
+    const start = () => {
+      const plan = fp.plan.map((L, li) => (only.includes(li) ? L : []));
+      if (soundOff) {
+        // 소리 없이: 같은 박으로 글자만 번진다
+        let t = 200;
+        const timers = [];
+        plan.forEach((L, li) => L.forEach((f, fi) => { timers.push(setTimeout(() => light(li, fi), t)); t += f.len * 1000 + (fi === L.length - 1 ? 500 : 80); }));
+        return { stop() { timers.forEach(clearTimeout); }, done: wait(t + 400) };
+      }
+      return G.audio.sing(plan, light);
+    };
+    const skipped = new Promise((r) => skip.addEventListener('click', () => r('skip'), { once: true }));
+    const wantAll = all ? new Promise((r) => all.addEventListener('click', () => r('all'), { once: true })) : new Promise(() => {});
+    singer = start();
+    let why = await Promise.race([singer.done.then(() => 'done'), skipped, wantAll]);
     singer.stop();
     light(-1);
+    if (why === 'all') {
+      // 세 장 모두 다시 부른다
+      all.remove();
+      only = [0, 1, 2];
+      singer = start();
+      await Promise.race([singer.done, skipped]);
+      singer.stop();
+      light(-1);
+    }
     skip.remove();
+    if (all) all.remove();
   };
 })();

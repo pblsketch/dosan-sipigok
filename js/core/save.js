@@ -24,7 +24,11 @@
     first: {},              // 곡별 첫 시도: 곡 → [맞음, 전체]
     firstKind: {},          // 곡·영역별 첫 시도: '곡-영역' → [맞음, 전체]
     wrong: [],              // 오답 노트 [{song, kind, text}]
-    helped: 0,              // 도움(여백 메모) 쓴 횟수
+    helped: 0,              // 도움(여백 메모·정답 보기) 쓴 횟수
+    helpSong: {},           // 곡별 도움 횟수(通 낙관 판정)
+    helpAsked: {},          // 곡별로 "도움을 보면 通이 안 찍혀요"를 확인했는지
+    retry: {},              // '도움 없이 다시' 중인 곡
+    gold: {},               // 다시 해서 되찾은 通(금빛)
     startedAt: {},          // 부마다 시작 시각
     finishedAt: {},         // 부마다 마친 시각
   });
@@ -51,7 +55,7 @@
     resetPart(part) {
       const nums = part === 1 ? [1, 2, 3, 4, 5, 6] : [7, 8, 9, 10, 11, 12];
       const drop = (obj) => { for (const k of Object.keys(obj)) if (nums.includes(+String(k).split('-')[0])) delete obj[k]; };
-      for (const o of [S.done, S.steps, S.found, S.cut, S.mind, S.first, S.firstKind]) drop(o);
+      for (const o of [S.done, S.steps, S.found, S.cut, S.mind, S.first, S.firstKind, S.helpSong, S.helpAsked, S.retry, S.gold]) drop(o);
       S.wrong = S.wrong.filter((w) => !nums.includes(w.song));
       delete S.sealed[part]; delete S.startedAt[part]; delete S.finishedAt[part];
       this.write();
@@ -63,6 +67,22 @@
       const k = (S.firstKind[song + '-' + kind] = S.firstKind[song + '-' + kind] || [0, 0]);
       if (ok) { s[0]++; f[0]++; k[0]++; }
       s[1]++; f[1]++; k[1]++;
+    },
+    // 곡 하나만 처음부터(도움 없이 다시). 오답 노트와 전체 기록은 남긴다
+    resetSong(n) {
+      const drop = (obj) => { for (const k of Object.keys(obj)) if (+String(k).split('-')[0] === n) delete obj[k]; };
+      for (const o of [S.done, S.steps, S.found, S.cut, S.mind, S.first, S.firstKind, S.helpSong, S.helpAsked]) drop(o);
+      S.retry[n] = true;
+      this.write();
+    },
+    help(song) {
+      S.helped++;
+      if (song) S.helpSong[song] = (S.helpSong[song] || 0) + 1;
+    },
+    // 通 낙관: 곡의 모든 문제를 첫 시도에 맞히고 도움을 쓰지 않았다
+    mastered(song) {
+      const f = S.first[song];
+      return !!(S.gold[song] || (S.done[song] && f && f[1] && f[0] === f[1] && !S.helpSong[song]));
     },
     wrong(song, kind, text) {
       if (!S.wrong.some((w) => w.text === text)) S.wrong.push({ song, kind, text });

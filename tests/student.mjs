@@ -47,7 +47,12 @@ async function solveBatch(wrongFirst) {
     if (slots[0] && /^r\d+$/.test(slots[0])) { const a = {}; for (const s of slots) a[s] = 'k' + s.slice(1); return a; } // 2부 되짚기
     const cur = G.app.cur();
     for (const bt of cur.song.ri.filter((x) => x.do === 'batch' || x.do === 'scales')) {
-      if (bt.do === 'scales') { if (slots.includes('l')) return { l: 'i' + bt.items.findIndex((x) => x.side === 'L'), r: 'i' + bt.items.findIndex((x) => x.side === 'R') }; continue; }
+      if (bt.do === 'scales') {
+        if (!slots.includes('l0')) continue;
+        const a = {};
+        for (const [sd, p] of [['L', 'l'], ['R', 'r']]) bt.items.map((x, i) => ({ x, i })).filter((o) => o.x.side === sd).forEach((o, k) => { a[p + k] = 'i' + o.i; });
+        return a;
+      }
       const ans = {}; for (const r of bt.rows) for (const s of r.slots) ans[s.id] = s.answer;
       if (slots.every((id) => ans[id])) return ans;
     }
@@ -57,8 +62,10 @@ async function solveBatch(wrongFirst) {
   const ids = Object.keys(plan);
   const put = async (chip, slot) => { await vis(`.pool .chip[data-id="${chip}"]`).click(); await wait(90); await vis(`.slot[data-slot="${slot}"]`).click(); await wait(90); };
   if (wrongFirst && ids.length >= 2) {
-    await put(plan[ids[1]], ids[0]); await put(plan[ids[0]], ids[1]);
-    for (const id of ids.slice(2)) await put(plan[id], id);
+    // 첫 칸과 마지막 칸을 맞바꿔 넣는다(저울처럼 같은 접시 안은 순서가 상관없으므로 양 끝을 바꾼다)
+    const last = ids[ids.length - 1];
+    await put(plan[last], ids[0]); await put(plan[ids[0]], last);
+    for (const id of ids.slice(1, -1)) await put(plan[id], id);
     await vis('button:has-text("확정하기")').last().click(); await wait(450);
     const msg = await vis('.batch .msg').last().textContent();
     check(/칸이 맞아요/.test(msg), '묶음 오답 안내가 나와야 함');
@@ -108,10 +115,12 @@ async function solveOrder(wrongFirst) {
 
 async function chooseOnce(wrongFirst) {
   const info = await page.evaluate(() => {
-    const norm = (t) => String(t).replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+    const norm = (t) => String(t).replace(/\{([^|}]+)\|[^}]+\}/g, '$1').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
     const ok = new Set(); const all = [];
     const walk = (v) => { if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') { if (v.t) { all.push(v); if (v.ok) ok.add(norm(G.util.yet(v.t))); } Object.values(v).forEach(walk); } };
-    walk(SONGS); walk(INTRO);
+    // 다른 곡의 정답이 이 곡의 오답 보기로 나오므로 지금 곡만 본다
+    const cur = G.app.cur && G.app.cur();
+    if (cur && document.querySelector('.play')) walk(cur.song); else walk(INTRO);
     const el = [...document.querySelectorAll('.choose:not(.done)')].pop();
     const opts = [...el.querySelectorAll('.opt')].map((o) => { const x = o.cloneNode(true); x.querySelectorAll('rt').forEach((r) => r.remove()); return norm(x.textContent); });
     const okIdx = opts.findIndex((t) => ok.has(t));
@@ -147,6 +156,8 @@ async function kyeong(num, opts = {}) {
     break;
   }
   if (opts.shot) await shot(`s${num}_found`);
+  const gb = await page.evaluate(() => { const c = G.app.cur(); return [...document.querySelectorAll('.poem u.gb')].filter((u) => !c.song.words[u.dataset.w].ri).length; });
+  check(gb > 0, num + '곡 풀이에 시어 빈자리가 있어야 함');
   let first = true;
   for (let guard = 0; guard < 8 && await vis('.tray .wcard').count(); guard++) {
     const card = vis('.tray .wcard').first();
@@ -161,10 +172,13 @@ async function kyeong(num, opts = {}) {
     await wait(380);
   }
   await wait(700);
+  const left = await page.evaluate(() => { const c = G.app.cur(); return [...document.querySelectorAll('.poem u.gb')].filter((u) => !c.song.words[u.dataset.w].ri).length; });
+  check(left === 0, num + '곡 시어를 다 넣으면 풀이 빈자리가 모두 드러나야 함(' + left + ')');
 }
 
 async function foot(num, opts = {}) {
   await page.waitForSelector('.footboard .fline');
+  check(await page.locator('.footrule').count() === 1, num + '곡 음보 규칙 띠');
   const cuts = await page.evaluate(() => G.app.cur().song.feet.map((f) => [...G.text.feet(f).cuts]));
   const lines = page.locator('.footboard:not(.singing) .fline');
   if (opts.wrong) {
@@ -174,10 +188,20 @@ async function foot(num, opts = {}) {
     check(await page.locator('.pop').count() > 0, '음보 오답 풍선');
     await page.mouse.click(5, 5); await wait(100);
   }
+  check(await page.locator('.poem.mokpan').count() === 1, num + '곡 음보 끊기 동안 원문 판은 띄어쓰기 없이');
+  check(await page.locator('.fline .need').count() === 3, num + '곡 남은 빗금 점');
+  let bySyl = !!opts.slow;
   for (let li = 0; li < 3; li++) {
     if (await lines.nth(li).evaluate((r) => r.classList.contains('done'))) continue;
-    for (const i of cuts[li]) { await lines.nth(li).locator(`.gap[data-i="${i}"]`).click(); await wait(opts.slow ? 420 : 200); }
+    for (const i of cuts[li]) {
+      // 글자를 눌러도 그 뒤가 끊긴다(첫 곡에서 한 번 확인)
+      if (bySyl) { await lines.nth(li).locator(`.syl[data-i="${i}"]`).click(); bySyl = false; await wait(200); check(await lines.nth(li).locator(`.gap[data-i="${i}"].cut`).count() === 1, '글자를 눌러 끊기'); }
+      else await lines.nth(li).locator(`.gap[data-i="${i}"]`).click();
+      await wait(opts.slow ? 420 : 200);
+    }
   }
+  const dots = await page.locator('.fline .need').allTextContents();
+  check(dots.every((d) => !d.includes('○')), num + '곡 빗금 점이 모두 채워져야 함 ' + dots.join(' '));
   // 종장 첫 음보 카드(처음 한 번)
   const rule = vis('.next-row button:has-text("알겠어요")');
   try { await rule.last().waitFor({ timeout: 3500 }); await rule.last().click(); } catch (e) { /* 이미 본 카드 */ }
@@ -213,13 +237,15 @@ async function ri(num, opts = {}) {
   throw new Error(num + '곡 理 읽기가 끝나지 않음');
 }
 
-async function finish(num) {
+async function finish(num, opts = {}) {
   await page.waitForSelector('.play.st-done');
-  await wait(2200);
+  await wait(600);
+  if (!opts.noMind) await chooseOnce(num === 4 && !opts.stay); // 4곡은 화자의 마음을 한 번 틀려 본다(다시 하기에서는 바로)
+  await page.waitForSelector('.tong-note', { timeout: 12000 });
+  await wait(500);
   await shot(`s${num}_wash`);
-  await chooseOnce(num === 4); // 4곡은 화자의 마음을 한 번 틀려 본다
-  await wait(400);
   check(await page.locator('.card .kind').filter({ hasText: '알아 두기' }).count() > 0, num + '곡 한눈에 요약');
+  check(await page.locator('.scene .scene-seal').count() === 1, num + '곡 풍경 위 낙관');
 }
 
 async function song(num, opts = {}) {
@@ -242,10 +268,17 @@ async function song(num, opts = {}) {
   await ri(num, opts);
   if (opts.shot) await shot(`s${num}_foot`);
   await foot(num, opts);
-  await finish(num);
-  // 다음 곡으로
-  const next = vis('.next-row button').filter({ hasText: /곡 ▶|완성 ▶/ });
-  await next.last().click();
+  await finish(num, opts);
+  // 병풍에 걸기 → 병풍에서 다음 곡(또는 결과)
+  await vis('.next-row button').filter({ hasText: /병풍에 걸기|길에 새기기/ }).click();
+  await page.waitForSelector('.page.map');
+  check(await page.locator('.pane.hang').count() === 1, num + '곡 병풍에 걸기');
+  await wait(1700);
+  if (opts.shot) await shot(`s${num}_hang`);
+  if (opts.stay) return;
+  const go = vis('.next-row .btn.primary');
+  if (await go.count()) await go.click();
+  else await vis('.next-row .btn.seal').click();
 }
 
 async function intro(p) {
@@ -260,6 +293,7 @@ async function intro(p) {
   }
   await page.waitForSelector('.page.map');
   await shot(`map${p}`);
+  check(await page.locator('.tong-lead').count() === 1, '通 낙관 안내');
 }
 
 async function result(p) {
@@ -336,9 +370,19 @@ await song(6, { shot: true });
 log('6곡 끝');
 await result(1);
 
-// 2부(결과 화면 단추로)
+check(await page.locator('button:has-text("2부 언학으로")').count() === 0, '1부를 막 마치면 2부 단추는 다음 시간에');
+// 도움 없이 다시: 4곡(마음을 한 번 틀림) → 다시 읽기 규칙으로 → 금빛 通
+await page.goto(BASE + '?part=1'); await page.waitForSelector('.page.map'); await wait(600);
+check(await page.locator('.pane .tong.xi').count() >= 1, '通이 없는 폭에는 習 낙관');
+await vis('.retry-row button:has-text("제4곡")').click(); await wait(300);
+await vis('.sheet button:has-text("다시 하기")').click();
+await song(4, { stay: true });
+check(await page.locator('.pane .tong.gold').count() === 1, '도움 없이 다시 → 금빛 通');
+log('4곡 다시 하기 → 금빛 通');
+// 2부(처음 화면에서)
 log('2부 시작');
-await vis('button:has-text("2부 언학으로")').click();
+await page.goto(BASE); await page.waitForSelector('.title-screen');
+await vis('.btn.part:has-text("2부")').click();
 await intro(2);
 await vis('.next-row .btn.primary').click();
 await song(7, { shot: true, wrong: true, listen: true });

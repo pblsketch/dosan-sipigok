@@ -48,12 +48,13 @@ async function step() {
   const open = vis('.choose:not(.done)');
   if (await open.count()) {
     const idx = await open.last().evaluate((el) => {
-      const norm = (t) => t.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+      const norm = (t) => t.replace(/\{([^|}]+)\|[^}]+\}/g, '$1').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
       const ok = new Set();
       const walk = (v) => { if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') { if (v.ok && v.t) ok.add(norm(G.util.yet(v.t))); Object.values(v).forEach(walk); } };
-      walk(SONGS); walk(INTRO);
+      const cur = G.app.cur && G.app.cur();
+      if (cur && document.querySelector('.play')) walk(cur.song); else walk(INTRO); // 다른 곡의 정답이 오답 보기로 나온다
       const opts = [...el.querySelectorAll('.opt')];
-      const i = opts.findIndex((o) => ok.has(norm(o.textContent)));
+      const i = opts.findIndex((o) => ok.has(norm((() => { const x = o.cloneNode(true); x.querySelectorAll('rt').forEach((r) => r.remove()); return x.textContent; })())));
       return i >= 0 ? i : 0;
     });
     await open.last().locator('.opt').nth(idx).click();
@@ -76,10 +77,15 @@ async function playSong(num) {
   for (let i = 0; i < 160; i++) {
     const cls = await page.evaluate(() => (document.querySelector('.play') || {}).className || '');
     for (const st of ['st-ri', 'st-foot', 'st-done']) if (cls.includes(st) && !shots.has(st)) { shots.add(st); await page.waitForTimeout(st === 'st-done' ? 2600 : 900); await shot(`s${num}_${st}`); }
-    const next = vis('.next-row button:has-text("▶")').filter({ hasText: /곡 ▶|완성 ▶/ });
-    if (cls.includes('st-done') && await next.count() && !(await vis('.choose:not(.done)').count())) {
+    // 곡 끝: 병풍에 걸기 → 병풍에서 다음 곡(마지막 곡이면 결과)
+    const hang = vis('.next-row button').filter({ hasText: /병풍에 걸기|길에 새기기/ });
+    if (cls.includes('st-done') && await hang.count()) {
       await shot(`s${num}_done`);
-      await next.last().click();
+      await hang.click();
+      await page.waitForSelector('.page.map');
+      await page.waitForTimeout(1700);
+      const go = vis('.next-row .btn.primary');
+      if (await go.count()) await go.click(); else await vis('.next-row .btn.seal').click();
       return;
     }
     const r = await step();

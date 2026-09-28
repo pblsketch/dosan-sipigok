@@ -20,21 +20,33 @@
   const gm = (G.gimmicks = {});
 
   // ───────── 장면 조각 실행기 ─────────
+  // 곧바로 문제가 이어지면 앞 카드는 '알겠어요'를 기다리지 않고 펼쳐 둔다(넘기기 탭 줄이기)
+  const PASSIVE = new Set(['lens', 'unlens', 'say', 'fx', 'img', 'sil', 'fill', 'music', 'voice']);
+  const ASKS = new Set(['choose', 'batch', 'sort', 'order', 'scales', 'fork', 'recall']);
   gm.play = async function (beats, c, box) {
-    for (const b of beats || []) {
-      if (b.review === false && S().mode === 'review') continue;
-      if (b.first === false && S().mode !== 'review') continue;
+    const list = (beats || []).filter((b) => !(b.review === false && S().mode === 'review') && !(b.first === false && S().mode !== 'review'));
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
       const fn = BEAT[b.do];
       if (!fn) { console.warn('모르는 장면 조각', b.do); continue; }
+      const nb = list.slice(i + 1).find((x) => !PASSIVE.has(x.do) || (x.do === 'voice' && x.next));
+      if (c) c.nextAsks = !!nb && ASKS.has(nb.do);
       await fn(b, c, box);
       if (G.app && c && c.song && document.querySelector('.play') == null) return; // 화면을 떠남
     }
   };
   gm.run = async function (c) {
-    c.helpFn = () => c.riHint || '이치 읽기는 원문의 말을 근거로 생각해요. 원문과 풀이를 다시 읽어 보세요.';
+    // 여백 메모는 도움말이 있는 문제가 떠 있을 때만 쓸 수 있고, 그때만 도움으로 센다
+    c.riHint = null;
+    c.canHelp = () => !!c.riHint;
+    c.helpFn = () => { if (!c.riHint) return ''; G.save.help(c.song.n); G.save.write(); return c.riHint; };
     await gm.play(c.song.ri, c, c.task);
-    c.helpFn = null;
+    c.helpFn = null; c.canHelp = null;
   };
+  const afterCard = (b, c, box) => (b.after ? kit.card(box, b.after, { label: b.after.label, wait: !c.nextAsks }) : null);
+  // veil: 'aid'면 풀이·현대 표기를 가리고 원문만 보고 풀게 한다. true면 원문까지 가린다
+  const veil = (b, c) => { if (b.veil && c.poem) c.poem.classList.add(b.veil === 'aid' ? 'veiled-aid' : 'veiled'); };
+  const unveil = (c) => { if (c.poem) c.poem.classList.remove('veiled', 'veiled-aid'); };
   gm.open = async function (c) {
     c.task.innerHTML = '';
     await gm.play(c.song.open, c, c.task);
@@ -48,7 +60,7 @@
     async voice(b, c, box) { kit.voice(box, b.who, b.text); await wait(b.pause || 350); if (b.next) await kit.next(box, b.next); },
     async recallCard(b, c, box) { await kit.card(box, b); },
     async say(b, c, box) { kit.say(box, b.text); },
-    async card(b, c, box) { await kit.card(box, b, { label: b.label }); },
+    async card(b, c, box) { await kit.card(box, b, { label: b.label, wait: b.wait !== undefined ? b.wait : b.label ? true : !(c && c.nextAsks && b.kind !== 'fiction') }); },
     async next(b, c, box) { await kit.next(box, b.label || '다음 ▶'); },
     async clear(b, c, box) { box.innerHTML = ''; },
     async music(b) { G.audio.play(b.track); },
@@ -58,6 +70,7 @@
     async lens(b, c, box) {
       const sc = c.scene;
       sc.root.classList.add('lens');
+      const play = $('.play'); if (play) play.classList.add('lensing'); // 휴대폰에서 풍경을 키워 이름표가 보이게
       G.audio.lens();
       G.audio.play('ri');
       $$('.attr', sc.root).forEach((x) => x.remove());
@@ -70,33 +83,39 @@
     },
     async unlens(b, c) {
       c.scene.root.classList.remove('lens');
+      const play = $('.play'); if (play) play.classList.remove('lensing');
       $$('.attr', c.scene.root).forEach((x) => x.remove());
       $$('.sil-fig', c.scene.root).forEach((x) => { x.classList.remove('on'); setTimeout(() => x.remove(), 1300); });
       G.audio.play(c.song.music || (c.song.part === 1 ? 'eonji' : 'eonhak'));
     },
     async batch(b, c, box) {
       if (b.text) kit.say(box, b.text);
-      c.riHint = b.hint || c.riHint;
+      c.riHint = b.hint || null;
+      veil(b, c);
       await kit.batch(box, b.rows, b.pool, { song: c.song, kind: 'ri', title: b.title, confirm: b.confirm, seed: c.song ? c.song.n : 1, wrongNote: b.wrong });
-      if (b.after) await kit.card(box, b.after, { label: b.after.label });
+      unveil(c); c.riHint = null;
+      await afterCard(b, c, box);
     },
     async choose(b, c, box) {
-      c.riHint = b.hint || c.riHint;
+      c.riHint = b.hint || null;
+      veil(b, c);
       await kit.choose(box, b.q, b.options, { song: c.song, kind: b.kind || 'ri', free: b.free, seed: c.song ? c.song.n : 1, keepOrder: b.keepOrder, wrongNote: b.wrong });
-      if (b.after) await kit.card(box, b.after, { label: b.after.label });
-      else if (b.pauseAfter !== false) await kit.next(box, '다음 ▶');
+      unveil(c); c.riHint = null;
+      if (b.after) await afterCard(b, c, box);
+      else if (b.pauseAfter !== false && !c.nextAsks) await kit.next(box, '다음 ▶');
     },
     async sort(b, c, box) {
-      c.riHint = b.hint || c.riHint;
+      c.riHint = b.hint || null;
       await sortBoard(box, b, c);
-      if (b.after) await kit.card(box, b.after, { label: b.after.label });
+      c.riHint = null;
+      await afterCard(b, c, box);
     },
     async order(b, c, box) {
-      c.riHint = b.hint || c.riHint;
-      if (b.veil && c.poem) c.poem.classList.add('veiled');
+      c.riHint = b.hint || b.hint2 || null;
+      veil(b, c);
       await orderBoard(box, b, c);
-      if (c.poem) c.poem.classList.remove('veiled');
-      if (b.after) await kit.card(box, b.after, { label: b.after.label });
+      unveil(c); c.riHint = null;
+      await afterCard(b, c, box);
     },
     async sil(b, c, box) {
       const sc = c.scene;
@@ -158,19 +177,21 @@
         '<g class="pan r"><path d="M170 24 L156 56 M170 24 L184 56" /><path d="M150 56 H190 Q170 70 150 56 Z" /><text x="170" y="80">' + G.util.esc(b.right) + '</text></g></g>';
       box.appendChild(h('div.scales-wrap', svg));
       const beam = svg.querySelector('.beam');
+      // 접시에 올린 구절 수만큼 기운다. 양쪽이 같아지면 수평
       const tilt = (placed) => {
-        const l = !!placed.l, r = !!placed.r;
-        const deg = l && !r ? -12 : r && !l ? 12 : 0;
-        beam.style.transform = `rotate(${deg}deg)`;
+        const n = (p) => Object.keys(placed).filter((k) => k[0] === p && placed[k]).length;
+        beam.style.transform = `rotate(${G.util.clamp((n('l') - n('r')) * -8, -16, 16)}deg)`;
       };
       const items = b.items.map((it, i) => ({ id: 'i' + i, text: it.t, side: it.side }));
+      // 같은 접시 안에서는 어느 칸에 올려도 맞다(alt)
+      const side = (s, p) => { const on = items.filter((x) => x.side === s); return on.map((x, k) => ({ id: p + k, answer: x.id, alt: on.map((y) => y.id), label: '구절을 올리세요' })); };
       await kit.batch(box, [
-        { head: '⚖ ' + b.left, slots: [{ id: 'l', answer: items.find((x) => x.side === 'L').id, label: '구절을 올리세요' }] },
-        { head: '⚖ ' + b.right, slots: [{ id: 'r', answer: items.find((x) => x.side === 'R').id, label: '구절을 올리세요' }] },
+        { head: '⚖ ' + b.left, slots: side('L', 'l') },
+        { head: '⚖ ' + b.right, slots: side('R', 'r') },
       ], items, { song: c.song, kind: 'ri', title: '쉬움·어려움 저울', seed: 12, onChange: tilt });
       svg.classList.add('level');
       G.audio.found();
-      if (b.after) await kit.card(box, b.after, { label: b.after.label });
+      await afterCard(b, c, box);
     },
     // 2부 도입: 1부 되짚기(1부를 마쳤으면 떠올려 잇기, 아니면 요약)
     async recall(b, c, box) {
@@ -214,6 +235,7 @@
   function sortBoard(box, b, c) {
     return new Promise((resolve) => {
       if (b.q) kit.say(box, b.q);
+      if (b.legend) box.appendChild(h('ul.legend', ...b.legend.map((t) => h('li', G.util.boldNodes(yet(t))))));
       const wrap = h('div.sortb');
       const pick = {};
       const items = b.keepOrder ? b.items : shuffleNot(b.items, c.song ? c.song.n : 3);
@@ -254,7 +276,7 @@
       });
       reveal.addEventListener('click', () => {
         items.forEach((it, i) => { pick[i] = it.bin; $$('.bin', rows[i]).forEach((x, k) => x.classList.toggle('on', b.bins[k].id === it.bin)); });
-        S().helped++; confirm.disabled = false; confirm.click();
+        G.save.help(c.song && c.song.n); confirm.disabled = false; confirm.click();
       });
     });
   }
@@ -296,7 +318,7 @@
         msg.textContent = `${items.length}자리 가운데 ${ok}자리가 맞아요.` + (b.hint2 && tries >= 2 ? ' ' + yet(b.hint2) : '');
         if (tries >= 3) reveal.hidden = false;
       });
-      reveal.addEventListener('click', () => { seq.length = 0; seq.push(...items); redraw(); S().helped++; confirm.click(); });
+      reveal.addEventListener('click', () => { seq.length = 0; seq.push(...items); redraw(); G.save.help(c.song && c.song.n); confirm.click(); });
     });
   }
 
@@ -319,6 +341,7 @@
       ['이치 잇기 첫 시도', pct(sumKind(p, 'ri'))],
       ['음보 끊기 첫 시도', pct(sumKind(p, 'foot'))],
       ['화자의 마음 첫 시도', pct(sumKind(p, 'mind'))],
+      ['마친 곡 · 通 낙관(첫 시도 만점·도움 없이)', partSongs(p).filter((x) => st.done[x.n]).length + '곡 · 通 ' + partSongs(p).filter((x) => G.save.mastered(x.n)).length + ' / 6'],
       ['도움(여백 메모·정답 보기)', st.helped + '번'],
       ['읽기 방식 · 걸린 시간', (st.mode === 'review' ? '다시 읽기' : '처음 읽기') + (mins ? ` · ${mins}분` : '')],
     ];
@@ -327,10 +350,14 @@
   gm.result = async function (p, box) {
     const st = S();
     const list = partSongs(p);
-    box.appendChild(h('p.lead', p === 1 ? '여섯 폭 병풍이 모두 색을 되찾았어요. 마지막 폭에 이름 낙관을 찍어 마무리하세요.' : '배움의 길 여섯 구간을 모두 걸었어요. 길 끝에 이름 낙관을 찍어 마무리하세요.'));
-    // 완성한 그림
+    const doneN = list.filter((x) => st.done[x.n]).length;
+    box.appendChild(h('p.lead', doneN < list.length
+      ? `${list.length}${p === 1 ? '폭' : '구간'} 가운데 ${doneN}${p === 1 ? '폭' : '구간'}을 되살렸어요. 지금까지 한 것을 제출할 수 있어요. 남은 곡은 병풍에서 이어서 할 수 있어요.`
+      : p === 1 ? '여섯 폭 병풍이 모두 색을 되찾았어요. 마지막 폭에 이름 낙관을 찍어 마무리하세요.' : '배움의 길 여섯 구간을 모두 걸었어요. 길 끝에 이름 낙관을 찍어 마무리하세요.'));
+    // 완성한 그림(아직 못 한 폭은 바랜 채로)
     const art = h('div.final.' + (p === 1 ? 'byeongpung' : 'gil'));
-    list.forEach((x) => art.appendChild(h('div.pane.done', h('span.img', { style: { backgroundImage: `url(assets/sc/${x.scene.img}.webp)`, backgroundPosition: x.scene.thumb || '50% 50%' } }), h('span.lbl', h('b', yet(x.title)), h('small', yet(x.key))))));
+    list.forEach((x) => art.appendChild(h('div.pane' + (st.done[x.n] ? '.done' : ''), h('span.img', { style: { backgroundImage: `url(assets/sc/${x.scene.img}${st.done[x.n] ? '' : '_f'}.webp)`, backgroundPosition: x.scene.thumb || '50% 50%' } }), h('span.lbl', h('b', yet(x.title)), h('small', st.done[x.n] ? yet(x.key) : '아직')),
+      G.save.mastered(x.n) ? h('span.tong' + (st.gold[x.n] ? '.gold' : ''), '通') : st.done[x.n] ? h('span.tong.xi', '習') : null)));
     const seal = h('div.name-seal' + (st.sealed[p] ? '.on' : ''), h('span', gm.sealText(st.name)));
     const sealLen = () => { seal.dataset.len = Math.min(3, gm.sealText(st.name).length || 1); seal.firstChild.textContent = gm.sealText(st.name); };
     sealLen();
@@ -349,14 +376,14 @@
     box.append(art, h('div.row-btns.name-row', nameIn, stampBtn));
 
     // 마음 지도(2부에서 1부까지 마쳤으면 열두 곡)
-    const mindSongs = p === 2 && partSongs(1).every((x) => st.done[x.n]) ? SONGS : list;
+    const mindSongs = (p === 2 && partSongs(1).every((x) => st.done[x.n]) ? SONGS : list).filter((x) => st.done[x.n]);
     const map = h('div.mindmap');
     mindSongs.forEach((x) => {
       const pick = st.mind[x.n];
       const right = x.mind.options.find((o) => o.ok).t;
       map.appendChild(h('div.mrow' + (x.part === 1 ? '.p1' : '.p2'), h('span.mn', x.n + '곡'), h('span.mk', yet(x.key)), h('span.mm', pick || '—', pick && pick !== right ? h('small', ' → ' + right) : null)));
     });
-    box.appendChild(h('div.card.note', h('span.kind', '마음 지도'), h('h3', mindSongs.length === 12 ? '열두 곡의 마음' : '여섯 곡의 마음'), map,
+    box.appendChild(h('div.card.note', h('span.kind', '마음 지도'), h('h3', mindSongs.length === 12 ? '열두 곡의 마음' : mindSongs.length === 6 ? '여섯 곡의 마음' : '마친 곡의 마음'), map,
       h('p.small.muted', p === 1 ? '언지: 자연 속에서 뜻을 세우는 마음 — 만족 → 겸허 → 확신 → 연군 → 안타까움 → 감탄' : '언학: 배움으로 나아가는 마음 — 즐거움 → 깨달음 → 결의 → 전념 → 의지 → 몰두')));
 
     // 기록
@@ -372,7 +399,9 @@
       h('div.row-btns',
         h('button.btn.primary', { type: 'button', on: { click: () => gm.saveImage(p) } }, '그림 파일로 저장'),
         h('button.btn', { type: 'button', on: { click: () => G.app.title() } }, '처음 화면'),
-        p === 1 ? h('button.btn.seal', { type: 'button', on: { click: () => G.app.part(2) } }, '2부 언학으로 ▶') : null)));
+        // 2부는 다음 시간에(1부 되짚기가 인출 연습이 되게). 1부를 마친 지 3시간이 지났거나 선생님용이면 바로 열린다
+        p === 1 && (st.teacher || S().intro[2] || (st.finishedAt[1] && Date.now() - st.finishedAt[1] > 3 * 3600e3)) ? h('button.btn.seal', { type: 'button', on: { click: () => G.app.part(2) } }, '2부 언학으로 ▶') : null),
+      p === 1 && !(st.teacher || S().intro[2] || (st.finishedAt[1] && Date.now() - st.finishedAt[1] > 3 * 3600e3)) ? h('p.small.muted', '2부는 다음 시간에 해요. 지난 시간 병풍을 떠올리는 되짚기부터 시작해요. 시간이 남으면 병풍에서 習 낙관 폭을 "도움 없이 다시" 해 通을 되찾아 보세요.') : null));
     G.audio.fanfare();
   };
 
@@ -386,7 +415,7 @@
     g.fillStyle = '#efe6d2'; g.fillRect(0, 0, W, H);
     g.fillStyle = '#26221d'; g.textAlign = 'center'; g.font = `700 44px ${serif}`;
     g.fillText(p === 1 ? '도산십이곡 · 언지 병풍' : '도산십이곡 · 언학의 길', W / 2, 70);
-    const imgs = await Promise.all(list.map((x) => new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = `assets/sc/${x.scene.img}.webp`; })));
+    const imgs = await Promise.all(list.map((x) => new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = `assets/sc/${x.scene.img}${st.done[x.n] ? "" : "_f"}.webp`; })));
     // 병풍 틀
     const px = 60, py = 110, pw = (W - 120) / 6, ph = 560;
     g.fillStyle = '#5a3a22'; g.fillRect(px - 8, py - 8, W - 120 + 16, ph + 16);
@@ -399,6 +428,11 @@
         g.drawImage(im, x + 6 + (pw - 12 - dw) / 2, py + 6 + (ph - 50 - dh) / 2, dw, dh); g.restore();
       }
       g.fillStyle = '#26221d'; g.font = `700 22px ${serif}`; g.fillText(list[i].title, x + pw / 2, py + ph - 16);
+      if (st.done[list[i].n]) {
+        const m = G.save.mastered(list[i].n), s = 40, sx = x + pw - s - 12, sy = py + 14;
+        g.fillStyle = m ? (st.gold[list[i].n] ? '#b8892c' : '#b3342a') : '#544a3e'; g.fillRect(sx, sy, s, s);
+        g.fillStyle = '#f8f2e4'; g.font = `700 28px ${serif}`; g.textBaseline = 'middle'; g.fillText(m ? '通' : '習', sx + s / 2, sy + s / 2 + 1); g.textBaseline = 'alphabetic';
+      }
     });
     // 낙관
     const sealT = st.sealed[p] ? gm.sealText(st.name) : '';

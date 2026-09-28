@@ -49,6 +49,8 @@ window.G = window.G || {};
     return r;
   };
   U.wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // 휴대폰 진동(안드로이드만, 없으면 조용히 넘어감)
+  U.buzz = () => { try { if (navigator.vibrate && G.save.state.sound) navigator.vibrate(8); } catch (e) { /* 무시 */ } };
   U.clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   // 글 속 표시 → HTML: **굵게** → <b>, {漢字|한글} → 루비(한자 끄기면 한글만), [ㅎㆍ] → 옛한글

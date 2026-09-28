@@ -22,7 +22,7 @@ let n = 0;
 const shot = async (name) => { n++; await page.screenshot({ path: fileURLToPath(new URL(String(n).padStart(2, '0') + '_' + name + '.png', OUT)) }); };
 const vis = (sel) => page.locator(sel).filter({ visible: true });
 const next = async () => { const b = vis('.next-row button').filter({ hasText: /다음 ▶|알겠어요/ }); if (await b.count()) { await b.last().click(); await page.waitForTimeout(250); return true; } return false; };
-const norm = (t) => t.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+const norm = (t) => t.replace(/\{([^|}]+)\|[^}]+\}/g, '$1').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
 
 // 곡으로 바로(앞 단계는 끝낸 것으로)
 async function open(num, doneSteps) {
@@ -47,7 +47,7 @@ async function solveBatch(wrongFirst) {
     const song = SONGS.find((s) => s.n === n);
     const beats = (song.ri || []).filter((x) => x.do === 'batch' || x.do === 'scales');
     for (const bt of beats) {
-      if (bt.do === 'scales') { const items = bt.items.map((it, i) => ({ id: 'i' + i, side: it.side })); return { l: items.find((x) => x.side === 'L').id, r: items.find((x) => x.side === 'R').id }; }
+      if (bt.do === 'scales') { const a = {}; for (const [sd, p] of [['L', 'l'], ['R', 'r']]) bt.items.map((x, i) => ({ x, i })).filter((o) => o.x.side === sd).forEach((o, k) => { a[p + k] = 'i' + o.i; }); return a; }
       const ans = {}; for (const r of bt.rows) for (const s of r.slots) ans[s.id] = s.answer;
       if (slots.every((id) => ans[id])) return ans;
     }
@@ -56,12 +56,13 @@ async function solveBatch(wrongFirst) {
   if (!plan) throw new Error('묶음 답을 못 찾음');
   const ids = Object.keys(plan);
   if (wrongFirst && ids.length >= 2) {
-    // 첫째 칸에 둘째 답을 넣어 본다
-    await vis(`.pool .chip[data-id="${plan[ids[1]]}"]`).click();
+    // 첫째 칸과 마지막 칸의 답을 맞바꿔 넣어 본다(저울은 같은 접시 안의 순서가 상관없으므로 양 끝을 바꾼다)
+    const last = ids[ids.length - 1];
+    await vis(`.pool .chip[data-id="${plan[last]}"]`).click();
     await vis(`.slot[data-slot="${ids[0]}"]`).click();
     await vis(`.pool .chip[data-id="${plan[ids[0]]}"]`).click();
-    await vis(`.slot[data-slot="${ids[1]}"]`).click();
-    for (const id of ids.slice(2)) { await vis(`.pool .chip[data-id="${plan[id]}"]`).click(); await vis(`.slot[data-slot="${id}"]`).click(); }
+    await vis(`.slot[data-slot="${last}"]`).click();
+    for (const id of ids.slice(1, -1)) { await vis(`.pool .chip[data-id="${plan[id]}"]`).click(); await vis(`.slot[data-slot="${id}"]`).click(); }
     await vis('button:has-text("확정하기")').last().click();
     await page.waitForTimeout(500);
     await shot('batch_wrong');
@@ -74,11 +75,11 @@ async function solveBatch(wrongFirst) {
 }
 async function chooseOk() {
   const idx = await page.evaluate(() => {
-    const norm = (t) => t.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+    const norm = (t) => t.replace(/\{([^|}]+)\|[^}]+\}/g, '$1').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
     const ok = new Set(); const walk = (v) => { if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') { if (v.ok && v.t) ok.add(norm(G.util.yet(v.t))); Object.values(v).forEach(walk); } };
-    walk(SONGS);
+    walk(G.app.cur().song); // 다른 곡의 정답이 이 곡의 오답 보기로 나온다
     const el = [...document.querySelectorAll('.choose:not(.done)')].pop();
-    const i = [...el.querySelectorAll('.opt')].findIndex((o) => ok.has(norm(o.textContent)));
+    const i = [...el.querySelectorAll('.opt')].findIndex((o) => ok.has(norm((() => { const x = o.cloneNode(true); x.querySelectorAll('rt').forEach((r) => r.remove()); return x.textContent; })())));
     return i < 0 ? 0 : i;
   });
   await vis('.choose:not(.done) .opt').nth(idx).click();
@@ -124,10 +125,7 @@ for (let k = 0; k < 6 && await vis('.tray .wcard').count(); k++) {
 }
 await page.waitForTimeout(1200);
 await shot('s6_placed');
-// 理: 짝 맞추기(한 번 틀려 보기) → 이름표 → 고르기
-await solveBatch(true);
-await shot('s6_batch_ok');
-await next();
+// 理: 알아 두기 카드(기다리지 않음) → 이름표 → 고르기
 await page.waitForTimeout(1500);
 await shot('s6_lens');
 await chooseOk();
@@ -157,8 +155,8 @@ await shot('s9_order');
   await shot('s9_order_ok');
 }
 await next();
-await solveBatch(false);
-await shot('s9_batch');
+await chooseOk();
+await shot('s9_choose');
 
 // ── 10곡: 갈림길 → 가르기
 await open(10, ['open', 'kyeong']);
@@ -198,7 +196,8 @@ await shot('s1_foot');
   await vis('.fline').nth(0).locator('.gap[data-i="1"]').click(); // 틀린 곳(낱말 가운데)
   await page.waitForTimeout(300);
   await shot('s1_foot_wrong');
-  for (let li = 0; li < 3; li++) for (const i of cuts[li]) { await vis('.fline').nth(li).locator(`.gap[data-i="${i}"]`).click(); await page.waitForTimeout(220); }
+  // 글자를 눌러 끊기(그 글자 뒤가 끊긴다)
+  for (let li = 0; li < 3; li++) for (const i of cuts[li]) { await vis('.fline').nth(li).locator(`.syl[data-i="${i}"]`).click(); await page.waitForTimeout(220); }
   await vis('.next-row button:has-text("알겠어요")').click({ timeout: 8000 });
   await page.waitForTimeout(1800);
   await shot('s1_sing');
