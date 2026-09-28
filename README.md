@@ -80,6 +80,7 @@
 - **글꼴**: 원문은 Noto Serif CJK KR(옛한글 조합 기능 포함), 본문은 Noto Serif KR, 제목은 나눔손글씨 붓 — 게임에 쓰인 글자만 남긴 부분 글꼴(SIL OFL 1.1, `assets/fonts/OFL.txt`).
 - **코드**: HTML + CSS + 순수 JavaScript(빌드 없음).
 - **테스트**(`tests/`, `npm install` 뒤 설치된 크롬으로):
+  - `node student.mjs phone|tablet|desktop`: **학생처럼 처음부터 끝까지**(선생님용 단추 없이 12곡을 모두 직접 풀기, 일부러 틀리기, 곡 중간 새로 고침 이어 하기, 메뉴·설정·병풍 접기, 낙관·그림 저장, 다시 읽기). 배포본 점검은 `BASE=https://pblsketch.github.io/dosan-sipigok/ node student.mjs`
   - `node full.mjs phone|desktop`: 1부·2부 처음부터 끝까지(도입·되짚기·12곡·결과·낙관)
   - `node interact.mjs phone|desktop`: 선생님용 단추 없이 직접 풀기(계절 바퀴·끌어 놓기·묶음 확정 재시도·차례·갈림길·가르기·저울·음보 끊기와 노래)
   - `node audio.mjs [--preview]`: 배경음 음량·클리핑

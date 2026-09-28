@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "student": "node student.mjs phone && node student.mjs tablet && node student.mjs desktop",
     "full": "node full.mjs phone && node full.mjs desktop",
     "interact": "node interact.mjs phone && node interact.mjs desktop"
   },

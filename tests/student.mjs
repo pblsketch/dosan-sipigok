@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const which = process.argv[2] || 'phone';
-const SIZE = { phone: { width: 390, height: 844, isMobile: true, hasTouch: true }, desktop: { width: 1366, height: 860 } };
+const SIZE = { phone: { width: 390, height: 844, isMobile: true, hasTouch: true }, tablet: { width: 820, height: 1180, isMobile: true, hasTouch: true }, desktop: { width: 1366, height: 860 } };
 let BASE = process.env.BASE || 'http://127.0.0.1:8766/';
 if (!BASE.endsWith('/') && !BASE.endsWith('.html')) BASE += '/';
 const OUT = new URL('./shots/student_' + which + '/', import.meta.url);
