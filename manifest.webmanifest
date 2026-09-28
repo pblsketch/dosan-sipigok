@@ -1,0 +1,12 @@
+{
+  "name": "도산십이곡: 마음을 씻는 노래",
+  "short_name": "도산십이곡",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#efe6d2",
+  "theme_color": "#efe6d2",
+  "icons": [
+    { "src": "assets/ui/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/ui/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

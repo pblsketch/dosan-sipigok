@@ -1,0 +1,12 @@
+{
+  "name": "dosan-sipigok-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "full": "node full.mjs phone && node full.mjs desktop",
+    "interact": "node interact.mjs phone && node interact.mjs desktop"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
